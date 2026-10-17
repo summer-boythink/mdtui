@@ -1,4 +1,4 @@
-# mdtui ◈ Terminal Markdown Reader
+# mdtui  Terminal Markdown Reader
 
 [中文版](README.zh-CN.md)
 
