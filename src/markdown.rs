@@ -533,18 +533,28 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
                         CodeBlockKind::Fenced(s) => s.to_string(),
                         CodeBlockKind::Indented => String::new(),
                     };
+                    // 代码块顶栏：色条 + ``` + 高亮的语言名，全行统一底色
+                    let bar = || Span::styled("│ ", Style::default().fg(t.accent).bg(t.code_bg));
+                    let fence = Style::default().fg(t.code_lang).bg(t.code_bg);
+                    let mut fence_spans = vec![bar(), Span::styled("```", fence)];
+                    if !b.code_lang.is_empty() {
+                        fence_spans.push(Span::styled(
+                            b.code_lang.clone(),
+                            Style::default()
+                                .fg(t.accent)
+                                .bg(t.code_bg)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
                     let label = if b.code_lang.is_empty() {
                         "```".to_string()
                     } else {
                         format!("```{}", b.code_lang)
                     };
                     b.out.push(LogicalLine {
-                        line: Line::from(vec![Span::styled(
-                            label.clone(),
-                            Style::default().fg(t.code_lang),
-                        )]),
+                        line: Line::from(fence_spans),
                         kind: LineKind::Code,
-                        plain: label,
+                        plain: format!("│ {label}"),
                     });
                 }
                 Tag::HtmlBlock => {}
@@ -671,20 +681,24 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
                     }
                     let lang = std::mem::take(&mut b.code_lang);
                     let lines = std::mem::take(&mut b.code_lines);
+                    // 每行加左侧色条（样式与纯文本同步，搜索高亮不错位）
+                    let bar_style = Style::default().fg(t.accent).bg(t.code_bg);
                     for (spans, text) in crate::syntax::highlight_code_lines(t, &lang, &lines) {
+                        let mut spans = spans;
+                        spans.insert(0, Span::styled("│ ", bar_style));
                         b.out.push(LogicalLine {
                             line: Line::from(spans),
                             kind: LineKind::Code,
-                            plain: text,
+                            plain: format!("│ {text}"),
                         });
                     }
                     b.out.push(LogicalLine {
-                        line: Line::from(vec![Span::styled(
-                            "```",
-                            Style::default().fg(t.code_lang),
-                        )]),
+                        line: Line::from(vec![
+                            Span::styled("│ ", bar_style),
+                            Span::styled("```", Style::default().fg(t.code_lang).bg(t.code_bg)),
+                        ]),
                         kind: LineKind::Code,
-                        plain: "```".to_string(),
+                        plain: "│ ```".to_string(),
                     });
                     b.blank();
                 }
@@ -1216,6 +1230,52 @@ mod tests {
             .join("\n");
         assert!(!all.contains("title: x"), "front matter: {all}");
         assert!(all.contains("# T"), "body kept: {all}");
+    }
+
+    #[test]
+    fn code_block_has_bar_and_lang_label() {
+        let doc = render_markdown("```rust\nfn main() {}\n```\n", &theme());
+        let plains: Vec<String> = doc.logical.iter().map(|l| l.plain.clone()).collect();
+        // 顶栏 / 内容 / 底栏都有色条前缀
+        assert!(plains.iter().any(|l| l == "│ ```rust"), "fence: {plains:?}");
+        assert!(
+            plains.iter().any(|l| l == "│ fn main() {}"),
+            "body: {plains:?}"
+        );
+        assert!(plains.iter().any(|l| l == "│ ```"), "close: {plains:?}");
+        // 语言名用 accent 加粗
+        let top = doc.logical.iter().find(|l| l.plain == "│ ```rust").unwrap();
+        let lang_span = top.line.spans.iter().find(|s| s.content == "rust").unwrap();
+        assert_eq!(lang_span.style.fg, Some(theme().accent));
+        assert!(lang_span.style.add_modifier.contains(Modifier::BOLD));
+        // 色条 span 与纯文本同步（搜高亮不错位的根基）
+        for l in &doc.logical {
+            let span_text: String = l.line.spans.iter().map(|s| s.content.clone()).collect();
+            assert_eq!(span_text, l.plain, "spans/plain in sync");
+        }
+    }
+
+    #[test]
+    fn code_block_blank_line_keeps_bar() {
+        let doc = render_markdown("```\na\n\nb\n```\n", &theme());
+        let plains: Vec<String> = doc.logical.iter().map(|l| l.plain.clone()).collect();
+        assert!(
+            plains.contains(&"│ ".to_string()),
+            "blank keeps bar: {plains:?}"
+        );
+    }
+
+    #[test]
+    fn search_inside_code_with_bar() {
+        let doc = render_markdown("```rust\nfn main() {}\n```\n", &theme());
+        let wrapped = wrap_doc(&doc, 60, &theme());
+        let shown = apply_search(&wrapped, "main", Some(0), &theme());
+        let hit = shown.iter().any(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.style.bg == Some(theme().match_cur_bg) && s.content.contains("main"))
+        });
+        assert!(hit, "match highlighted inside code");
     }
 
     #[test]
