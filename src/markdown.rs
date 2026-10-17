@@ -18,8 +18,8 @@ use crate::theme::Theme;
 enum LineKind {
     /// 普通文本：按宽度换行。
     Normal,
-    /// 标题：按宽度换行；H1 在换行阶段居中。
-    Heading { h1: bool },
+    /// 标题：按宽度换行；H1 在换行阶段居中。level 1-6 供大纲缩进用。
+    Heading { level: u8 },
     /// 代码行：换行并把每段补齐到整宽（展示整块背景）。
     Code,
     /// 表格行：绝不换行（保住列对齐），超宽由组件裁剪。
@@ -51,6 +51,8 @@ pub struct WrappedLine {
     pub line: Line<'static>,
     pub text: String,
     pub heading: bool,
+    /// 标题 level（1-6），非标题为 0。
+    pub level: u8,
 }
 
 // ---------- 解析 ----------
@@ -239,9 +241,7 @@ impl<'t> Builder<'t> {
     fn flush(&mut self, kind: LineKind) {
         // 标题内的换行也记为标题（供居中与跳转用）。
         let kind = if let Some(level) = self.heading {
-            LineKind::Heading {
-                h1: matches!(level, HeadingLevel::H1),
-            }
+            LineKind::Heading { level: level as u8 }
         } else {
             kind
         };
@@ -975,12 +975,14 @@ pub fn wrap_doc(doc: &RenderedDoc, width: usize, theme: &Theme) -> Vec<WrappedLi
                     line: Line::from(vec![Span::styled(s.clone(), Style::default().fg(color))]),
                     text: String::new(),
                     heading: false,
+                    level: 0,
                 });
             }
             LineKind::NoWrap => out.push(WrappedLine {
                 line: ll.line.clone(),
                 text: ll.plain.clone(),
                 heading: false,
+                level: 0,
             }),
             LineKind::Code => {
                 for (line, text) in wrap_spans(&ll.line, width, false) {
@@ -997,10 +999,12 @@ pub fn wrap_doc(doc: &RenderedDoc, width: usize, theme: &Theme) -> Vec<WrappedLi
                         line,
                         text,
                         heading: false,
+                        level: 0,
                     });
                 }
             }
-            LineKind::Heading { h1 } => {
+            LineKind::Heading { level } => {
+                let h1 = level == 1;
                 for (fi, (line, text)) in wrap_spans(&ll.line, width, true).into_iter().enumerate()
                 {
                     // H1 居中：左右补空格（样式与文本同步，保证搜索高亮不错位）
@@ -1021,6 +1025,7 @@ pub fn wrap_doc(doc: &RenderedDoc, width: usize, theme: &Theme) -> Vec<WrappedLi
                         line,
                         text,
                         heading: fi == 0,
+                        level: if fi == 0 { level } else { 0 },
                     });
                 }
             }
@@ -1030,6 +1035,7 @@ pub fn wrap_doc(doc: &RenderedDoc, width: usize, theme: &Theme) -> Vec<WrappedLi
                         line,
                         text,
                         heading: false,
+                        level: 0,
                     });
                 }
             }

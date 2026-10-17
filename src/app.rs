@@ -18,6 +18,7 @@ use crate::tree::FileTree;
 pub enum Focus {
     Sidebar,
     Preview,
+    Outline,
 }
 
 /// 底部输入状态。
@@ -98,8 +99,14 @@ pub struct App {
     pub prev_area: Rect,
     /// 侧栏 List 的持久选中态（含滚动 offset，点击换算行号靠它）。
     pub side_state: ListState,
-    /// 标题索引：（展示行号，标题文本），跳转与当前位置用。
-    pub headings: Vec<(usize, String)>,
+    /// 标题索引：（展示行号，level，标题文本），跳转与当前位置用。
+    pub headings: Vec<(usize, u8, String)>,
+    /// 右侧大纲栏（默认关闭，`o` 打开）。
+    pub outline_visible: bool,
+    pub outline_width: u16,
+    pub outline_area: Rect,
+    pub outline_state: ListState,
+    pub outline_cursor: usize,
 }
 
 impl App {
@@ -137,6 +144,11 @@ impl App {
             prev_area: Rect::default(),
             side_state: ListState::default(),
             headings: Vec::new(),
+            outline_visible: false,
+            outline_width: 26,
+            outline_area: Rect::default(),
+            outline_state: ListState::default(),
+            outline_cursor: 0,
         };
         if let Some(path) = preselect.map(|p| p.to_path_buf()) {
             app.open_file(&path);
@@ -278,9 +290,12 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter(|(_, w)| w.heading)
-                .map(|(i, w)| (i, clean_heading(&w.text)))
-                .filter(|(_, s)| !s.is_empty())
+                .map(|(i, w)| (i, w.level.max(1), clean_heading(&w.text)))
+                .filter(|(_, _, s)| !s.is_empty())
                 .collect();
+            self.outline_cursor = self
+                .outline_cursor
+                .min(self.headings.len().saturating_sub(1));
         }
     }
 
@@ -352,14 +367,14 @@ impl App {
         let target = if delta > 0 {
             self.headings
                 .iter()
-                .find(|(i, _)| *i > self.scroll)
-                .map(|(i, _)| *i)
+                .find(|(i, ..)| *i > self.scroll)
+                .map(|(i, ..)| *i)
         } else {
             self.headings
                 .iter()
                 .rev()
-                .find(|(i, _)| *i < self.scroll)
-                .map(|(i, _)| *i)
+                .find(|(i, ..)| *i < self.scroll)
+                .map(|(i, ..)| *i)
         };
         if let Some(i) = target {
             self.scroll = i;
@@ -374,8 +389,22 @@ impl App {
         self.headings
             .iter()
             .rev()
-            .find(|(i, _)| *i <= self.scroll)
-            .map(|(_, s)| s.as_str())
+            .find(|(i, ..)| *i <= self.scroll)
+            .map(|(_, _, s)| s.as_str())
+    }
+
+    /// 当前章节在大纲里的下标（大纲高亮用）。
+    pub fn current_section_idx(&self) -> Option<usize> {
+        self.headings.iter().rposition(|(i, ..)| *i <= self.scroll)
+    }
+
+    /// 跳到大纲第 idx 个标题。
+    pub fn jump_to_outline(&mut self, idx: usize) {
+        if let Some((line, ..)) = self.headings.get(idx) {
+            self.scroll = *line;
+            self.outline_cursor = idx;
+            self.clamp_scroll();
+        }
     }
 
     // ---------- 鼠标 ----------
@@ -411,6 +440,10 @@ impl App {
         if Self::hit(&self.side_area, col, row) {
             self.focus = Focus::Sidebar;
             self.tree.move_cursor(STEP * dir);
+        } else if Self::hit(&self.outline_area, col, row) {
+            // 大纲栏滚轮：正文线性滚动（与预览一致，不意外跳章节）
+            self.focus = Focus::Outline;
+            self.scroll_preview(STEP * dir);
         } else if Self::hit(&self.prev_area, col, row) {
             self.focus = Focus::Preview;
             self.scroll_preview(STEP * dir);
@@ -435,6 +468,18 @@ impl App {
             }
             self.tree.cursor = idx;
             self.open_selected();
+        } else if Self::hit(&self.outline_area, col, row) {
+            self.focus = Focus::Outline;
+            let inner = row.saturating_sub(self.outline_area.y + 1) as usize;
+            let inner_h = (self.outline_area.height as usize).saturating_sub(2);
+            if inner >= inner_h {
+                return;
+            }
+            let idx = self.outline_state.offset() + inner;
+            if idx >= self.headings.len() {
+                return;
+            }
+            self.jump_to_outline(idx);
         } else if Self::hit(&self.prev_area, col, row) {
             self.focus = Focus::Preview;
         }
@@ -490,12 +535,8 @@ impl App {
                 self.show_help = !self.show_help;
                 self.help_scroll = 0;
             }
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.focus = match self.focus {
-                    Focus::Sidebar => Focus::Preview,
-                    Focus::Preview => Focus::Sidebar,
-                };
-            }
+            KeyCode::Tab => self.cycle_focus(1),
+            KeyCode::BackTab => self.cycle_focus(-1),
             KeyCode::Char('b') => self.toggle_sidebar(),
             KeyCode::Char('e') => self.toggle_sidebar(), // Explorer：与 b 同义，好按
             KeyCode::Char('t') => self.cycle_theme(1),
@@ -533,6 +574,7 @@ impl App {
             }
             KeyCode::Char('{') => self.jump_heading(-1),
             KeyCode::Char('}') => self.jump_heading(1),
+            KeyCode::Char('o') => self.toggle_outline(),
             KeyCode::Char('n') => self.search_jump(1),
             KeyCode::Char('N') => self.search_jump(-1),
             _ => self.pane_key(code, mods),
@@ -586,8 +628,26 @@ impl App {
                 }
                 KeyCode::Char('g') | KeyCode::Home => self.scroll_preview(isize::MIN / 2),
                 KeyCode::Char('G') | KeyCode::End => self.scroll_preview(isize::MAX / 2),
-                KeyCode::Char('h') | KeyCode::Left if !self.sidebar_visible => {}
-                KeyCode::Enter if !self.sidebar_visible => {}
+                _ => {}
+            },
+            Focus::Outline => match code {
+                KeyCode::Char('j') | KeyCode::Down => self.move_outline(1),
+                KeyCode::Char('k') | KeyCode::Up => self.move_outline(-1),
+                KeyCode::Char('d') | KeyCode::PageDown => self.move_outline(5),
+                KeyCode::Char('u') | KeyCode::PageUp => self.move_outline(-5),
+                KeyCode::Char('g') | KeyCode::Home => {
+                    self.outline_cursor = 0;
+                    self.jump_to_outline(0);
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    let last = self.headings.len().saturating_sub(1);
+                    self.outline_cursor = last;
+                    self.jump_to_outline(last);
+                }
+                KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
+                    self.jump_to_outline(self.outline_cursor);
+                }
+                KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Preview,
                 _ => {}
             },
         }
@@ -652,6 +712,40 @@ impl App {
         } else if self.focus == Focus::Sidebar {
             self.focus = Focus::Preview;
         }
+    }
+
+    fn toggle_outline(&mut self) {
+        self.outline_visible = !self.outline_visible;
+        if self.outline_visible {
+            self.focus = Focus::Outline;
+        } else if self.focus == Focus::Outline {
+            self.focus = Focus::Preview;
+        }
+    }
+
+    /// Tab / Shift+Tab 在可见窗格间轮转焦点（隐藏的窗格自动跳过）。
+    fn cycle_focus(&mut self, dir: isize) {
+        let mut panes = vec![];
+        if self.sidebar_visible {
+            panes.push(Focus::Sidebar);
+        }
+        panes.push(Focus::Preview);
+        if self.outline_visible {
+            panes.push(Focus::Outline);
+        }
+        let cur = panes.iter().position(|&f| f == self.focus).unwrap_or(0) as isize;
+        let next = (cur + dir).rem_euclid(panes.len() as isize) as usize;
+        self.focus = panes[next];
+    }
+
+    /// 大纲光标移动并同步跳转正文。
+    fn move_outline(&mut self, delta: isize) {
+        if self.headings.is_empty() {
+            return;
+        }
+        let n = self.headings.len() as isize;
+        self.outline_cursor = (self.outline_cursor as isize + delta).clamp(0, n - 1) as usize;
+        self.jump_to_outline(self.outline_cursor);
     }
 
     fn adjust_sidebar(&mut self, delta: i16) {
@@ -826,6 +920,57 @@ mod tests {
         app.side_area = Rect::default();
         app.prev_area = Rect::default();
         app.on_mouse(MouseEventKind::ScrollDown, 5, 5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outline_toggle_and_navigate() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let dir = sample_project("outline");
+        std::fs::write(
+            dir.join("doc.md"),
+            "# A\n\nt\n\n## B\n\nt\n\n### C\n\nt\n\n# D\n",
+        )
+        .unwrap();
+        let mut app = App::new(&dir, None, 0);
+        // 默认关闭
+        assert!(!app.outline_visible);
+        app.open_file(&dir.join("doc.md"));
+        app.ensure_wrapped(40);
+        app.view_h = 5;
+        // 索引带 level
+        let levels: Vec<u8> = app.headings.iter().map(|(_, l, _)| *l).collect();
+        assert_eq!(levels, vec![1, 2, 3, 1]);
+        // o 打开并聚焦
+        app.on_key(KeyCode::Char('o'), KeyModifiers::NONE);
+        assert!(app.outline_visible);
+        assert_eq!(app.focus, Focus::Outline);
+        // 大纲内 j 跳到 B
+        app.on_key(KeyCode::Char('j'), KeyModifiers::NONE);
+        assert_eq!(app.outline_cursor, 1);
+        assert!(app.scroll > 0);
+        // k 回到 A
+        app.on_key(KeyCode::Char('k'), KeyModifiers::NONE);
+        assert_eq!(app.outline_cursor, 0);
+        assert_eq!(app.scroll, 0);
+        // G 到最后
+        app.on_key(KeyCode::Char('G'), KeyModifiers::NONE);
+        assert_eq!(app.outline_cursor, 3);
+        // h 回预览
+        app.on_key(KeyCode::Char('h'), KeyModifiers::NONE);
+        assert_eq!(app.focus, Focus::Preview);
+        // Tab 在三个可见窗格间轮转
+        app.on_key(KeyCode::Tab, KeyModifiers::NONE);
+        assert_eq!(app.focus, Focus::Outline);
+        app.on_key(KeyCode::Tab, KeyModifiers::NONE);
+        assert_eq!(app.focus, Focus::Sidebar);
+        app.on_key(KeyCode::BackTab, KeyModifiers::NONE);
+        assert_eq!(app.focus, Focus::Outline);
+        // o 关闭回预览
+        app.focus = Focus::Outline;
+        app.on_key(KeyCode::Char('o'), KeyModifiers::NONE);
+        assert!(!app.outline_visible);
+        assert_eq!(app.focus, Focus::Preview);
         let _ = fs::remove_dir_all(&dir);
     }
 

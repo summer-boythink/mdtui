@@ -64,19 +64,34 @@ fn render_header(f: &mut Frame, app: &App, theme: &Theme, area: ratatui::layout:
 }
 
 fn render_body(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::layout::Rect) {
+    let mut constraints = vec![];
     if app.sidebar_visible {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(app.sidebar_width), Constraint::Min(10)])
-            .split(area);
-        app.side_area = cols[0];
-        app.prev_area = cols[1];
-        render_sidebar(f, app, theme, cols[0]);
-        render_preview(f, app, theme, cols[1]);
+        constraints.push(Constraint::Length(app.sidebar_width));
+    }
+    constraints.push(Constraint::Min(10));
+    if app.outline_visible {
+        constraints.push(Constraint::Length(app.outline_width));
+    }
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
+    let mut i = 0;
+    if app.sidebar_visible {
+        app.side_area = cols[i];
+        render_sidebar(f, app, theme, cols[i]);
+        i += 1;
     } else {
         app.side_area = ratatui::layout::Rect::default();
-        app.prev_area = area;
-        render_preview(f, app, theme, area);
+    }
+    app.prev_area = cols[i];
+    render_preview(f, app, theme, cols[i]);
+    i += 1;
+    if app.outline_visible {
+        app.outline_area = cols[i];
+        render_outline(f, app, theme, cols[i]);
+    } else {
+        app.outline_area = ratatui::layout::Rect::default();
     }
 }
 
@@ -158,6 +173,72 @@ fn render_sidebar(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
     state.select(if rows == 0 { None } else { Some(cursor) });
     f.render_stateful_widget(list, area, &mut state);
     app.side_state = state;
+}
+
+/// 右侧大纲栏：当前文档的标题结构 + 正在读的位置高亮，点击即跳。
+fn render_outline(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::layout::Rect) {
+    let t = *theme;
+    let focused = app.focus == Focus::Outline;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(if focused { t.focus } else { t.border }))
+        .title(Span::styled(
+            " 大纲 (o 关闭) ",
+            Style::default().fg(if focused { t.focus } else { t.muted }),
+        ))
+        .style(Style::default().bg(t.bg));
+
+    let inner_h = (area.height as usize).saturating_sub(2).max(1);
+    let items: Vec<ListItem> = if app.current_file.is_none() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "打开文档后显示",
+            Style::default().fg(t.muted),
+        )]))]
+    } else if app.headings.is_empty() {
+        vec![ListItem::new(Line::from(vec![Span::styled(
+            "本文无标题",
+            Style::default().fg(t.muted),
+        )]))]
+    } else {
+        // 焦点不在大纲时，光标跟随正文位置（滚轮/键盘/搜索/跳转都会同步）
+        if !focused && let Some(idx) = app.current_section_idx() {
+            app.outline_cursor = idx;
+        }
+        app.outline_cursor = app.outline_cursor.min(app.headings.len().saturating_sub(1));
+        app.headings
+            .iter()
+            .map(|(_, level, text)| {
+                let indent = "  ".repeat((level.saturating_sub(1)).min(4) as usize);
+                let style = if *level <= 1 {
+                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(t.fg)
+                };
+                ListItem::new(Line::from(vec![Span::styled(
+                    format!("{indent}{text}"),
+                    style,
+                )]))
+            })
+            .collect()
+    };
+    let rows = app.headings.len();
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(t.sel_bg).fg(t.sel_fg))
+        .highlight_symbol("");
+    let mut state = std::mem::take(&mut app.outline_state);
+    let mut offset = state.offset().min(rows.saturating_sub(inner_h));
+    let cursor = app.outline_cursor.min(rows.saturating_sub(1));
+    if cursor < offset {
+        offset = cursor;
+    } else if cursor >= offset + inner_h {
+        offset = cursor + 1 - inner_h;
+    }
+    *state.offset_mut() = offset;
+    state.select(if rows == 0 { None } else { Some(cursor) });
+    f.render_stateful_widget(list, area, &mut state);
+    app.outline_state = state;
 }
 
 fn preview_title(app: &App) -> String {
@@ -346,6 +427,11 @@ fn help_lines(t: &Theme) -> Vec<Line<'static>> {
         k("{ · }", "上一个 / 下一个标题"),
         k("t · T", "下一个 / 上一个主题（自动记住）"),
         Line::from(""),
+        h(" 大纲（右侧，默认关闭）"),
+        k("o", "打开 / 关闭大纲（打开即聚焦）"),
+        k("j/k · 回车", "大纲内移动并跳转章节"),
+        k("h", "从大纲回到预览"),
+        Line::from(""),
         h(" 鼠标"),
         k(
             "左键点击",
@@ -394,10 +480,13 @@ fn render_footer(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::lay
     } else {
         left_text = match app.focus {
             Focus::Sidebar => {
-                " j/k 移动 · l/回车 打开 · h 收起 · Tab 预览 · ? 帮助 · q 退出".to_string()
+                " j/k 移动 · l/回车 打开 · o 大纲 · Tab 切换 · ? 帮助 · q 退出".to_string()
             }
             Focus::Preview => {
-                " j/k/d/u/g/G 滚动 · / 搜索 · t 主题 · b/e 侧栏 · ? 帮助 · q 退出".to_string()
+                " j/k 滚动 · / 搜索 · b/e 侧栏 · o 大纲 · ? 帮助 · q 退出".to_string()
+            }
+            Focus::Outline => {
+                " j/k 跳章节 · 回车 定位 · h 回正文 · o 关闭 · ? 帮助 · q 退出".to_string()
             }
         };
         left_spans.push(Span::styled(
@@ -585,6 +674,29 @@ mod tests {
             step(&mut app, &mut terminal, k);
         }
         step(&mut app, &mut terminal, Char('?'));
+        // 大纲：默认关闭 → o 打开并聚焦 → 跳转 → 点击 → o 关闭
+        assert!(!app.outline_visible);
+        step(&mut app, &mut terminal, Char('o'));
+        assert!(app.outline_visible);
+        step(&mut app, &mut terminal, Char('j'));
+        step(&mut app, &mut terminal, Enter);
+        {
+            use crossterm::event::{MouseButton, MouseEventKind};
+            app.on_mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                app.outline_area.x + 2,
+                app.outline_area.y + 1,
+            );
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            app.on_mouse(
+                MouseEventKind::ScrollDown,
+                app.outline_area.x + 2,
+                app.outline_area.y + 2,
+            );
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+        }
+        step(&mut app, &mut terminal, Char('o'));
+        assert!(!app.outline_visible);
         // 侧栏焦点下的移动
         step(&mut app, &mut terminal, Tab);
         for k in [
