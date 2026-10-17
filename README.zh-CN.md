@@ -1,4 +1,4 @@
-# mdtui ◈ 终端 Markdown 阅读器
+# mdtui  终端 Markdown 阅读器
 
 [English](README.md)
 
