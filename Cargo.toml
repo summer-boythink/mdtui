@@ -1,0 +1,13 @@
+[package]
+name = "mdtui"
+version = "0.1.0"
+edition = "2024"
+description = "终端 Markdown 阅读器：文件树侧边栏 + 优雅渲染 + 自由切换主题"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = "0.29.0"
+pulldown-cmark = "0.13.4"
+ratatui = { version = "0.30.2", features = ["crossterm"] }
+unicode-width = "0.2.2"
