@@ -1,68 +1,86 @@
-# mdtui ◈ 终端 Markdown 阅读器
+# mdtui ◈ Terminal Markdown Reader
 
-在终端里优雅地看 Markdown：左侧文件树、右侧渲染预览，6 套深色 / 浅色主题随手换。
+[中文版](README.zh-CN.md)
+
+Read Markdown elegantly in your terminal: a file-tree sidebar on the left,
+rendered preview on the right, and 6 dark/light themes one key away.
 
 ```sh
-mdtui [路径] [-t 主题]
+mdtui [PATH] [-t THEME] [--lang en|zh]
 ```
 
-## 安装与运行
+## Install & Run
 
 ```sh
-cd mdtui
 cargo build --release
-./target/release/mdtui demo/展示.md   # 打开单文件
-./target/release/mdtui .              # 浏览目录
+./target/release/mdtui demo/展示.md   # open a single file
+./target/release/mdtui .              # browse a directory
 ```
 
-## 按键一览
+## Keys
 
-| 按键 | 动作 |
-|------|------|
-| `j/k` `↑/↓` | 上下移动 / 滚动 |
-| `h/l` `←/→` `回车` | 侧栏：收起 / 展开打开 |
-| `Tab` / 点击 | 切换侧栏 / 预览焦点（滚轮指哪滚哪，不必切换） |
-| `b` / `e` / `Ctrl+B` | 显示并聚焦 / 隐藏侧栏 |
-| `[` `]` | 侧栏变窄 / 变宽 |
-| 鼠标左键 | 侧栏点选即打开 / 点目录即展开；点预览切焦点 |
-| 滚轮 | 在所在窗格滚动 |
-| `t` / `T` | 下 / 上一个主题（自动记住） |
-| `a` | 仅 Markdown ⇄ 显示全部文件 |
-| `w` | 自动换行开 / 关 |
-| `/` `n` `N` | 搜索 / 下一个 / 上一个 |
-| `{` `}` | 上一个 / 下一个标题（标题栏显示当前章节） |
-| `o` | 打开 / 关闭右侧大纲（默认关闭，打开即聚焦） |
-| `R` / `r` | 刷新全部 / 重载当前文件 |
-| `?` | 帮助页 |
-| `q` / `Esc` / `Ctrl+C` | 退出 |
+| Key | Action |
+|-----|--------|
+| `j/k` `↑/↓` | Move / scroll |
+| `h/l` `←/→` `Enter` | Sidebar: collapse / expand & open |
+| `Tab` | Cycle sidebar / preview / outline focus |
+| `b` / `e` / `Ctrl+B` | Show & focus / hide sidebar |
+| `[` `]` | Sidebar narrower / wider |
+| `t` / `T` | Next / previous theme (remembered) |
+| `L` | Switch UI language EN ⇄ 中文 (remembered, English by default) |
+| `a` | Markdown only ⇄ all files |
+| `w` | Word wrap on / off |
+| `/` `n` `N` | Search / next / previous |
+| `{` `}` | Previous / next heading (current section in title bar) |
+| `o` | Open / close right outline (off by default, opens focused) |
+| `R` / `r` | Refresh all / reload current file |
+| Mouse click | Sidebar: open file / expand dir; click preview to focus |
+| Wheel | Scroll the pane under cursor |
+| `?` | Help page |
+| `q` / `Esc` / `Ctrl+C` | Quit |
 
-## 主题
+## Themes
 
-`mdtui --list-themes` 查看，`mdtui -t Nord` 指定，`t` 键轮换。选择保存在 `~/.config/mdtui/theme`，下次自动沿用。
+`mdtui --list-themes` to list, `mdtui -t Nord` to pick, `t` to cycle.
+The choice is saved to `~/.config/mdtui/theme` and reused next time.
 
-- Tokyo Night / Nord / Dracula / Gruvbox Dark（深色）
-- GitHub Light / Solarized Light（浅色）
+- Dark: Tokyo Night / Nord / Dracula / Gruvbox Dark
+- Light: GitHub Light / Solarized Light
 
-## 行为说明
+## Language
 
-- 默认只列出**目录 + Markdown 文件**（`.md/.markdown/.mdown/.mkdn/.mkd`），`a` 切换到全部（含隐藏文件）。
-- 非 Markdown 文本按纯文本预览；二进制与超过 5 MB 的文件不加载并给出提示。
-- 读不到的目录显示为空，权限不足会提示，程序不会崩。
-- 任何 panic 都会先恢复终端再打印错误，终端不会“花掉”。
-- 开启鼠标后，终端原生框选复制请按住 `Shift`（各类终端通用做法）。
-- 渲染细节：一级标题居中 + accent 下划线、列表按层级换符号（• ◦ ▪ ▸）、GitHub Alerts 彩色标题。
-- 代码块语法高亮（syntect 解析，配色跟随当前主题）：左侧 accent 色条 + 高亮的语言标签 + 整块统一底色；关键字 / 字符串 / 注释 / 函数名 / 数字各有颜色，未知语言退化为统一样式。
-- 右侧大纲栏（`o` 打开）：文档标题结构 + 当前阅读位置高亮，点击即跳，`j/k` 跳章节；滚轮在大纲上也是线性滚动。
+English by default. Press `L` in the app or start with `mdtui --lang zh`.
+The choice is saved to `~/.config/mdtui/lang`.
 
-## 代码结构
+## Behavior
+
+- By default only **directories + Markdown files** are listed
+  (`.md/.markdown/.mdown/.mkdn/.mkd`); `a` shows everything incl. hidden files.
+- Non-Markdown text is previewed as plain text; binary files and files over
+  5 MB are not loaded, with a friendly notice instead.
+- Unreadable directories show as empty with a notice; the app never crashes.
+- Any panic restores the terminal first, so it never gets "messed up".
+- With mouse captured, hold `Shift` for native text selection (standard).
+- Rendering details: centered H1 with accent underline, per-level bullets
+  (• ◦ ▪ ▸), colored GitHub Alerts, tables with alignment, full-width code
+  background with accent gutter + highlighted language label.
+- Fenced code blocks get syntax highlighting (syntect under the hood, colors
+  mapped to the active theme): keywords / strings / comments / function names /
+  numbers each have their color; unknown languages fall back to uniform style.
+- Right outline (`o`): document structure + current reading position, click
+  to jump, `j/k` to move between sections; wheel scrolls linearly like preview.
+
+## Layout
 
 ```text
 src/
-  main.rs      入口：参数 → 终端初始化 → 事件循环 → 清理
-  cli.rs       命令行参数
-  theme.rs     6 套主题 + 选择持久化
-  tree.rs      文件树模型（展开/过滤/排序）
-  markdown.rs  解析渲染 + 自研 CJK 换行 + 表格 + 搜索高亮
-  app.rs       状态、按键、搜索、滚动
-  ui.rs        顶栏 / 侧栏 / 预览 / 底栏 / 帮助页
+  main.rs      entry: args → terminal init → event loop → cleanup
+  cli.rs       CLI args
+  lang.rs      EN/ZH strings + persistence (English by default)
+  theme.rs     6 themes + persistence
+  tree.rs      file-tree model (expand/filter/sort)
+  markdown.rs  parse + render + CJK-friendly wrap + tables + search highlight
+  syntax.rs    code highlighting mapped onto our themes
+  app.rs       state, keys, search, scroll, mouse
+  ui.rs        header / sidebar / preview / outline / footer / help
 ```

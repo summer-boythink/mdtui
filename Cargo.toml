@@ -1,6 +1,6 @@
 [package]
 name = "mdtui"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 description = "终端 Markdown 阅读器：文件树侧边栏 + 优雅渲染 + 自由切换主题"
 

@@ -766,7 +766,7 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
                 TagEnd::Image => {
                     let alt = b.image_alt.take().unwrap_or_default();
                     let dest = b.image_dest.take().unwrap_or_default();
-                    b.push_span("[图 ".to_string(), Style::default().fg(t.muted));
+                    b.push_span("[image: ".to_string(), Style::default().fg(t.muted));
                     b.push_span(alt, Style::default().fg(t.fg));
                     b.push_span("]".to_string(), Style::default().fg(t.muted));
                     if !dest.is_empty() {

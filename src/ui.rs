@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let theme = app.theme();
     let area = f.area();
     if area.width < 20 || area.height < 6 {
-        f.render_widget(Paragraph::new("窗口太小，请放大终端后使用"), area);
+        f.render_widget(Paragraph::new(app.txt().term_too_small), area);
         return;
     }
 
@@ -42,7 +42,7 @@ fn render_header(f: &mut Frame, app: &App, theme: &Theme, area: ratatui::layout:
         .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "--".to_string());
     let left = format!(" ◈ mdtui   {} ", file);
-    let right = format!("主题 {} (t 切换) ", theme.name);
+    let right = app.lang.theme_label(theme.name);
     let w = area.width as usize;
     let pad = w.saturating_sub(
         UnicodeWidthStr::width(left.as_str()) + UnicodeWidthStr::width(right.as_str()),
@@ -113,7 +113,7 @@ fn render_sidebar(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
     let block = sidebar_block(app, theme, app.sidebar_title());
     let items: Vec<ListItem> = if app.tree.rows.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
-            "  (空目录)",
+            app.txt().empty_dir,
             Style::default().fg(t.muted),
         )]))]
     } else {
@@ -184,7 +184,7 @@ fn render_outline(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if focused { t.focus } else { t.border }))
         .title(Span::styled(
-            " 大纲 (o 关闭) ",
+            app.txt().outline_open_title,
             Style::default().fg(if focused { t.focus } else { t.muted }),
         ))
         .style(Style::default().bg(t.bg));
@@ -192,12 +192,12 @@ fn render_outline(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
     let inner_h = (area.height as usize).saturating_sub(2).max(1);
     let items: Vec<ListItem> = if app.current_file.is_none() {
         vec![ListItem::new(Line::from(vec![Span::styled(
-            "打开文档后显示",
+            app.txt().no_file_outline,
             Style::default().fg(t.muted),
         )]))]
     } else if app.headings.is_empty() {
         vec![ListItem::new(Line::from(vec![Span::styled(
-            "本文无标题",
+            app.txt().no_headings,
             Style::default().fg(t.muted),
         )]))]
     } else {
@@ -243,7 +243,7 @@ fn render_outline(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
 
 fn preview_title(app: &App) -> String {
     if app.show_help {
-        return " 帮助 (? 关闭) ".to_string();
+        return app.txt().help_title.to_string();
     }
     match &app.current_file {
         Some(p) => {
@@ -260,7 +260,7 @@ fn preview_title(app: &App) -> String {
                 },
             }
         }
-        None => " 预览 ".to_string(),
+        None => app.txt().preview_title.to_string(),
     }
 }
 
@@ -290,7 +290,7 @@ fn render_preview(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
 
     if app.show_help {
         app.help_h = inner_h;
-        let lines = help_lines(&t);
+        let lines = help_lines(app);
         let max = lines.len().saturating_sub(inner_h);
         app.help_scroll = app.help_scroll.min(max);
         let para = Paragraph::new(lines)
@@ -301,7 +301,7 @@ fn render_preview(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
     }
 
     if app.current_file.is_none() {
-        let lines = welcome_lines(&t);
+        let lines = welcome_lines(app);
         f.render_widget(Paragraph::new(lines).block(block), area);
         return;
     }
@@ -336,7 +336,9 @@ fn render_preview(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::la
     }
 }
 
-fn welcome_lines(t: &Theme) -> Vec<Line<'static>> {
+fn welcome_lines(app: &App) -> Vec<Line<'static>> {
+    let t = app.theme();
+    let x = app.txt();
     vec![
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -344,51 +346,53 @@ fn welcome_lines(t: &Theme) -> Vec<Line<'static>> {
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![Span::styled(
-            "     终端里的 Markdown 阅读器",
+            x.welcome_sub,
             Style::default().fg(t.muted),
         )]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  1. ", Style::default().fg(t.accent)),
-            Span::styled("在左侧文件树用 ", Style::default().fg(t.fg)),
+            Span::styled(x.pick_a, Style::default().fg(t.fg)),
             Span::styled(
                 "j / k",
                 Style::default().fg(t.bold).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" 选择文件", Style::default().fg(t.fg)),
+            Span::styled(x.in_tree, Style::default().fg(t.fg)),
         ]),
         Line::from(vec![
             Span::styled("  2. ", Style::default().fg(t.accent)),
-            Span::styled("按 ", Style::default().fg(t.fg)),
+            Span::styled(x.press, Style::default().fg(t.fg)),
             Span::styled(
-                "回车",
+                x.enter_key,
                 Style::default().fg(t.bold).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" 打开预览", Style::default().fg(t.fg)),
+            Span::styled(x.to_preview, Style::default().fg(t.fg)),
         ]),
         Line::from(vec![
             Span::styled("  3. ", Style::default().fg(t.accent)),
-            Span::styled("按 ", Style::default().fg(t.fg)),
+            Span::styled(x.press, Style::default().fg(t.fg)),
             Span::styled(
                 "t",
                 Style::default().fg(t.bold).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" 切换主题，按 ", Style::default().fg(t.fg)),
+            Span::styled(x.switch_theme_mid, Style::default().fg(t.fg)),
             Span::styled(
                 "?",
                 Style::default().fg(t.bold).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" 查看全部按键", Style::default().fg(t.fg)),
+            Span::styled(x.for_keys, Style::default().fg(t.fg)),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            "  默认只列出目录与 Markdown；按 a 查看全部文件；鼠标点选滚轮均可",
+            x.welcome_note,
             Style::default().fg(t.muted),
         )]),
     ]
 }
 
-fn help_lines(t: &Theme) -> Vec<Line<'static>> {
+fn help_lines(app: &App) -> Vec<Line<'static>> {
+    let t = app.theme();
+    let x = app.txt();
     let h = |s: &str| {
         Line::from(vec![Span::styled(
             s.to_string(),
@@ -405,47 +409,45 @@ fn help_lines(t: &Theme) -> Vec<Line<'static>> {
         ])
     };
     vec![
-        h(" 移动"),
-        k("j/k · ↑/↓", "上下移动（侧栏 / 文档 / 本页通用）"),
-        k("g/G · Home/End", "顶部 / 底部"),
-        k("d/u · PgDn/PgUp", "翻页（预览与帮助）"),
-        k("空格", "下一页"),
+        h(x.h_move),
+        k("j/k · ↑/↓", x.d_move),
+        k("g/G · Home/End", x.d_topbottom),
+        k("d/u · PgDn/PgUp", x.d_page),
+        k(x.key_space, x.d_nextpage),
         Line::from(""),
-        h(" 侧边栏"),
-        k("l/→/回车", "展开目录 / 打开文件"),
-        k("h/←", "收起目录 / 回到父目录"),
-        k("Tab · 点击", "切换侧栏 / 预览焦点（滚轮指哪滚哪，不用切）"),
-        k("b/e（Ctrl+B）", "显示并聚焦 / 隐藏侧栏"),
-        k("[ · ]", "侧栏变窄 / 变宽"),
-        k("a", "仅 Markdown ⇄ 显示全部文件"),
-        k("R", "刷新文件树与当前文件"),
+        h(x.h_sidebar),
+        k(x.key_open, x.d_open),
+        k("h/←", x.d_collapse),
+        k(x.key_tab, x.d_tab),
+        k(x.key_toggle, x.d_sidebar),
+        k("[ · ]", x.d_width),
+        k("a", x.d_filter),
+        k("R", x.d_refresh),
         Line::from(""),
-        h(" 预览"),
-        k("w", "自动换行开 / 关"),
-        k("r", "重载当前文件"),
-        k("/ · n/N", "搜索 / 下一个 / 上一个"),
-        k("{ · }", "上一个 / 下一个标题"),
-        k("t · T", "下一个 / 上一个主题（自动记住）"),
+        h(x.h_preview),
+        k("w", x.d_wrap),
+        k("r", x.d_reload),
+        k("/ · n/N", x.d_search),
+        k("{ · }", x.d_heading),
+        k("t · T", x.d_theme),
+        k("L", x.d_lang),
         Line::from(""),
-        h(" 大纲（右侧，默认关闭）"),
-        k("o", "打开 / 关闭大纲（打开即聚焦）"),
-        k("j/k · 回车", "大纲内移动并跳转章节"),
-        k("h", "从大纲回到预览"),
+        h(x.h_outline),
+        k("o", x.d_outline_toggle),
+        k(x.key_outline_go, x.d_outline_nav),
+        k("h", x.d_outline_back),
         Line::from(""),
-        h(" 鼠标"),
-        k(
-            "左键点击",
-            "侧栏：选文件即打开 / 点目录即展开；点预览切焦点",
-        ),
-        k("滚轮", "所在窗格滚动（帮助页里滚本页）"),
+        h(x.h_mouse),
+        k(x.key_click, x.d_mouse_click),
+        k(x.key_wheel, x.d_mouse_wheel),
         Line::from(vec![Span::styled(
-            "  提示：鼠标接管后，终端原生框选复制请按住 Shift",
+            x.d_mouse_tip,
             Style::default().fg(t.muted),
         )]),
         Line::from(""),
-        h(" 通用"),
-        k("? · Esc", "关闭本帮助"),
-        k("q · Ctrl+C", "退出"),
+        h(x.h_common),
+        k("? · Esc", x.d_help_close),
+        k("q · Ctrl+C", x.d_quit),
     ]
 }
 
@@ -459,7 +461,7 @@ fn render_footer(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::lay
         let q: String = app.search.query.iter().collect();
         let n = app.search.matches.len();
         let cur = if n == 0 { 0 } else { app.search.current + 1 };
-        left_text = format!("/{q}  {cur}/{n}  (Enter 确认 · Esc 取消)");
+        left_text = app.lang.search_status(&q, cur, n);
         left_spans.push(Span::styled(
             left_text.clone(),
             Style::default().fg(t.status_fg),
@@ -479,15 +481,9 @@ fn render_footer(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::lay
         ));
     } else {
         left_text = match app.focus {
-            Focus::Sidebar => {
-                " j/k 移动 · l/回车 打开 · o 大纲 · Tab 切换 · ? 帮助 · q 退出".to_string()
-            }
-            Focus::Preview => {
-                " j/k 滚动 · / 搜索 · b/e 侧栏 · o 大纲 · ? 帮助 · q 退出".to_string()
-            }
-            Focus::Outline => {
-                " j/k 跳章节 · 回车 定位 · h 回正文 · o 关闭 · ? 帮助 · q 退出".to_string()
-            }
+            Focus::Sidebar => app.txt().hint_sidebar.to_string(),
+            Focus::Preview => app.txt().hint_preview.to_string(),
+            Focus::Outline => app.txt().hint_outline.to_string(),
         };
         left_spans.push(Span::styled(
             left_text.clone(),
@@ -503,12 +499,8 @@ fn render_footer(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::lay
         } else {
             (app.scroll + app.view_h.min(total)) * 100 / total.max(1)
         };
-        format!(
-            "行 {}/{} · {}% ",
-            app.scroll + 1,
-            total.max(1),
-            pct.min(100)
-        )
+        app.lang
+            .pos_status(app.scroll + 1, total.max(1), pct.min(100))
     } else {
         format!("{} ", t.name)
     };
@@ -570,10 +562,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn renders_both_langs() {
+        use crate::lang::Lang;
+        let dir = std::env::temp_dir().join(format!("mdtui-langs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "# A\n\nhello\n").unwrap();
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        for lang in [Lang::En, Lang::Zh] {
+            let mut app = App::new(&dir, None, 0);
+            app.lang = lang;
+            // 欢迎页（无文件）+ 帮助页 + 预览页，三种都渲染一遍
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            app.show_help = true;
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+            app.show_help = false;
+            app.open_file(&dir.join("a.md"));
+            terminal.draw(|f| render(f, &mut app)).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// 脚本化会话：按真实用户顺序敲一遍全部功能键，每步都渲染，
     /// 任何越界 / 空态 / 缓存失效导致的 panic 都会在这里炸出来。
     #[test]
     fn scripted_session_no_panic() {
+        use crate::lang::{sandbox_lang_file, unsandbox_lang_file};
         use crate::theme::{THEME_TEST_LOCK, sandbox_theme_file, unsandbox_theme_file};
 
         let _guard = THEME_TEST_LOCK.lock().unwrap();
@@ -585,6 +601,7 @@ mod tests {
         std::fs::write(dir.join("sub").join("note.md"), "# Note\n\nworld\n").unwrap();
         std::fs::write(dir.join("code.txt"), "plain\n").unwrap();
         sandbox_theme_file(&dir.join("themefile"));
+        sandbox_lang_file(&dir.join("langfile"));
 
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -711,6 +728,11 @@ mod tests {
         ] {
             step(&mut app, &mut terminal, k);
         }
+        // 语言切换中英各渲染一次
+        step(&mut app, &mut terminal, Char('L'));
+        step(&mut app, &mut terminal, Char('?'));
+        step(&mut app, &mut terminal, Char('?'));
+        step(&mut app, &mut terminal, Char('L'));
         // 小窗口也不炸
         terminal.draw(|f| render(f, &mut app)).unwrap();
         assert!(app.scroll <= app.total_lines().max(1));
@@ -720,6 +742,7 @@ mod tests {
         assert!(app.should_quit);
 
         unsandbox_theme_file();
+        unsandbox_lang_file();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

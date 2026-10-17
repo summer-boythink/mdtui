@@ -18,6 +18,10 @@ pub struct Args {
     #[arg(short, long, value_name = "THEME")]
     pub theme: Option<String>,
 
+    /// 界面语言：en 或 zh（不填则用上次的，默认英文）
+    #[arg(long, value_name = "LANG")]
+    pub lang: Option<String>,
+
     /// 列出所有可用主题并退出
     #[arg(long)]
     pub list_themes: bool,

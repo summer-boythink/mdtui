@@ -7,6 +7,7 @@ use ratatui::widgets::ListState;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::lang::{Lang, Texts, save_lang};
 use crate::markdown::{
     RenderedDoc, WrappedLine, apply_search, render_markdown, render_text, wrap_doc,
 };
@@ -107,6 +108,8 @@ pub struct App {
     pub outline_area: Rect,
     pub outline_state: ListState,
     pub outline_cursor: usize,
+    /// 界面语言（默认英文，`L` 切换）。
+    pub lang: Lang,
 }
 
 impl App {
@@ -149,6 +152,7 @@ impl App {
             outline_area: Rect::default(),
             outline_state: ListState::default(),
             outline_cursor: 0,
+            lang: Lang::En,
         };
         if let Some(path) = preselect.map(|p| p.to_path_buf()) {
             app.open_file(&path);
@@ -158,6 +162,26 @@ impl App {
 
     pub fn theme(&self) -> Theme {
         THEMES[self.theme_idx % THEMES.len()]
+    }
+
+    pub fn txt(&self) -> &'static Texts {
+        self.lang.texts()
+    }
+
+    pub fn set_lang(&mut self, lang: Lang, persist: bool) {
+        self.lang = lang;
+        if persist {
+            save_lang(lang);
+        }
+        self.notify(self.lang.lang_changed());
+    }
+
+    pub fn toggle_lang(&mut self) {
+        let next = match self.lang {
+            Lang::En => Lang::Zh,
+            Lang::Zh => Lang::En,
+        };
+        self.set_lang(next, true);
     }
 
     pub fn set_theme(&mut self, idx: usize, persist: bool) {
@@ -172,7 +196,7 @@ impl App {
         if let Some(path) = self.current_file.clone() {
             self.open_file(&path);
         }
-        self.notify(format!("主题：{}", name));
+        self.notify(self.lang.theme_changed(name));
     }
 
     pub fn cycle_theme(&mut self, delta: isize) {
@@ -206,16 +230,13 @@ impl App {
         let theme = self.theme();
         match std::fs::metadata(path) {
             Ok(md) if md.len() > MAX_PREVIEW_BYTES => {
-                self.file_notice = Some(format!(
-                    "文件 {:.1} MB，超过预览上限（5 MB），未加载",
-                    md.len() as f64 / 1048576.0
-                ));
+                self.file_notice = Some(self.lang.file_too_big(md.len() as f64 / 1048576.0));
                 self.doc = render_text("", &theme);
             }
             Ok(_) => match std::fs::read(path) {
                 Ok(bytes) => {
                     if bytes.contains(&0) {
-                        self.file_notice = Some("可能是二进制文件，无法预览".to_string());
+                        self.file_notice = Some(self.lang.binary_file());
                         self.doc = render_text("", &theme);
                     } else {
                         let text = String::from_utf8_lossy(&bytes);
@@ -228,18 +249,18 @@ impl App {
                         self.doc = if is_md {
                             render_markdown(&text, &theme)
                         } else {
-                            self.file_notice = Some("非 Markdown 文件，按纯文本预览".to_string());
+                            self.file_notice = Some(self.lang.text_preview());
                             render_text(&text, &theme)
                         };
                     }
                 }
                 Err(e) => {
-                    self.file_notice = Some(format!("读取失败：{e}"));
+                    self.file_notice = Some(self.lang.read_failed(&e.to_string()));
                     self.doc = render_text("", &theme);
                 }
             },
             Err(e) => {
-                self.file_notice = Some(format!("读取失败：{e}"));
+                self.file_notice = Some(self.lang.read_failed(&e.to_string()));
                 self.doc = render_text("", &theme);
             }
         }
@@ -254,7 +275,7 @@ impl App {
         if row.is_dir {
             self.tree.toggle_expand();
             if self.tree.selected_unreadable() {
-                self.notify("该目录无法读取（权限不足？）".to_string());
+                self.notify(self.lang.dir_unreadable());
             }
         } else {
             self.open_file(&row.path);
@@ -267,7 +288,7 @@ impl App {
         if let Some(path) = self.current_file.clone() {
             self.open_file(&path);
         }
-        self.notify("已刷新".to_string());
+        self.notify(self.lang.refreshed());
     }
 
     // ---------- 换行 / 展示缓存 ----------
@@ -541,6 +562,7 @@ impl App {
             KeyCode::Char('e') => self.toggle_sidebar(), // Explorer：与 b 同义，好按
             KeyCode::Char('t') => self.cycle_theme(1),
             KeyCode::Char('T') => self.cycle_theme(-1),
+            KeyCode::Char('L') => self.toggle_lang(),
             KeyCode::Char('[') => self.adjust_sidebar(-2),
             KeyCode::Char(']') => self.adjust_sidebar(2),
             KeyCode::Char('w') => {
@@ -548,24 +570,24 @@ impl App {
                 self.wrapped_version = u64::MAX; // 强制重算
                 self.scroll = 0;
                 self.notify(if self.wrap_enabled {
-                    "自动换行：开".to_string()
+                    self.lang.wrap_on()
                 } else {
-                    "自动换行：关（超宽裁剪）".to_string()
+                    self.lang.wrap_off()
                 });
             }
             KeyCode::Char('a') => {
                 self.tree.toggle_show_all();
                 self.notify(if self.tree.show_all {
-                    "显示全部文件（含隐藏/非 md）".to_string()
+                    self.lang.show_all()
                 } else {
-                    "只显示目录 + Markdown".to_string()
+                    self.lang.show_md_only()
                 });
             }
             KeyCode::Char('R') => self.reload_all(),
             KeyCode::Char('r') => {
                 if let Some(path) = self.current_file.clone() {
                     self.open_file(&path);
-                    self.notify("文件已重载".to_string());
+                    self.notify(self.lang.file_reloaded());
                 }
             }
             KeyCode::Char('/') => {
@@ -663,11 +685,11 @@ impl App {
             KeyCode::Enter => {
                 self.input = InputMode::Normal;
                 if self.search.matches.is_empty() {
-                    self.notify("无匹配".to_string());
+                    self.notify(self.lang.no_match());
                 } else {
                     self.search_jump(0);
                     let n = self.search.matches.len();
-                    self.notify(format!("{n} 处匹配（n/N 跳转）"));
+                    self.notify(self.lang.matches_n(n));
                 }
             }
             KeyCode::Backspace => {
@@ -766,7 +788,7 @@ impl App {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.tree.root.to_string_lossy().into_owned());
         if self.tree.show_all {
-            format!(" {root} · 全部 ")
+            self.lang.sidebar_all_title(&root)
         } else {
             format!(" {root} ")
         }
@@ -971,6 +993,31 @@ mod tests {
         app.on_key(KeyCode::Char('o'), KeyModifiers::NONE);
         assert!(!app.outline_visible);
         assert_eq!(app.focus, Focus::Preview);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lang_toggle_and_notify() {
+        use crate::lang::{sandbox_lang_file, unsandbox_lang_file};
+        use crate::theme::THEME_TEST_LOCK;
+        let _guard = THEME_TEST_LOCK.lock().unwrap();
+        let dir = sample_project("lang");
+        sandbox_lang_file(&dir.join("langfile"));
+        let mut app = App::new(&dir, None, 0);
+        assert_eq!(app.lang, Lang::En);
+        assert_eq!(app.txt().d_quit, "Quit");
+        app.toggle_lang();
+        assert_eq!(app.lang, Lang::Zh);
+        assert_eq!(app.txt().d_quit, "退出");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("langfile"))
+                .unwrap()
+                .trim(),
+            "zh"
+        );
+        app.set_lang(Lang::En, false);
+        assert_eq!(app.lang, Lang::En);
+        unsandbox_lang_file();
         let _ = fs::remove_dir_all(&dir);
     }
 

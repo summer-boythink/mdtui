@@ -4,6 +4,7 @@
 
 mod app;
 mod cli;
+mod lang;
 mod markdown;
 mod syntax;
 mod theme;
@@ -25,13 +26,25 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::app::{App, InputMode};
 use crate::cli::Args;
+use crate::lang::{Lang, load_saved_lang};
 use crate::theme::{THEMES, load_saved_theme, theme_index_by_name, theme_names};
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    // 语言优先级：命令行 > 上次保存 > 默认英文。
+    let named_lang = args.lang.as_deref().and_then(Lang::from_code);
+    let lang = named_lang.unwrap_or_else(load_saved_lang);
+    if args.lang.is_some() && named_lang.is_none() {
+        eprintln!("{}", lang.unknown_lang(args.lang.as_deref().unwrap_or("")));
+    }
+    if named_lang.is_some() {
+        crate::lang::save_lang(lang);
+    }
+    let t = lang.texts();
+
     if args.list_themes {
-        println!("可用主题（`mdtui -t <名称>` 或按 t 切换）：");
+        println!("{}", lang.list_themes_header());
         for name in theme_names() {
             println!("  {name}");
         }
@@ -39,7 +52,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // 路径归一：文件 → 以父目录为根并预选中；目录 → 以它为根。
-    let (root, preselect): (PathBuf, Option<PathBuf>) = resolve_path(&args.path)?;
+    let (root, preselect): (PathBuf, Option<PathBuf>) = resolve_path(&args.path, lang)?;
 
     // 主题优先级：命令行 > 上次保存 > 默认首个。
     let named_idx = args.theme.as_deref().and_then(theme_index_by_name);
@@ -48,9 +61,11 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or(0);
     if args.theme.is_some() && named_idx.is_none() {
         eprintln!(
-            "未知主题 {:?}，可用：{}",
-            args.theme.as_deref().unwrap_or(""),
-            theme_names().join(" / ")
+            "{}",
+            lang.unknown_theme(
+                args.theme.as_deref().unwrap_or(""),
+                &theme_names().join(" / ")
+            )
         );
     }
     if named_idx.is_some() {
@@ -58,13 +73,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     install_panic_hook();
-    let mut terminal = init_terminal().context("终端初始化失败")?;
+    let mut terminal = init_terminal().context(t.err_term_init)?;
     let mut app = App::new(&root, preselect.as_deref(), theme_idx);
+    app.lang = lang;
 
     loop {
         terminal
             .draw(|f| ui::render(f, &mut app))
-            .context("绘制失败")?;
+            .context(t.err_draw)?;
         // 搜索态显示输入光标，其余时间隐藏
         if app.input == InputMode::Search {
             let _ = terminal.show_cursor();
@@ -74,8 +90,8 @@ fn main() -> anyhow::Result<()> {
         if app.should_quit {
             break;
         }
-        if event::poll(Duration::from_millis(200)).context("事件轮询失败")? {
-            match event::read().context("读取事件失败")? {
+        if event::poll(Duration::from_millis(200)).context(t.err_poll)? {
+            match event::read().context(t.err_read_ev)? {
                 Event::Key(key)
                     if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
                 {
@@ -95,9 +111,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// 解析启动路径。返回（根目录，预选中文件）。
-fn resolve_path(path: &PathBuf) -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
+fn resolve_path(path: &PathBuf, lang: Lang) -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
     let meta = std::fs::symlink_metadata(path)
-        .with_context(|| format!("路径不存在：{}", path.display()))?;
+        .with_context(|| lang.path_missing(&path.display().to_string()))?;
     if meta.file_type().is_symlink() || meta.is_file() {
         let abs = path.canonicalize().unwrap_or_else(|_| path.clone());
         let parent = abs
@@ -108,7 +124,7 @@ fn resolve_path(path: &PathBuf) -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
     } else if meta.is_dir() {
         Ok((path.clone(), None))
     } else {
-        bail!("不支持的路径类型：{}", path.display());
+        bail!("{}", lang.path_unsupported(&path.display().to_string()));
     }
 }
 
