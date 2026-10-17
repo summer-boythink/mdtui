@@ -5,6 +5,9 @@
 Read Markdown elegantly in your terminal: a file-tree sidebar on the left,
 rendered preview on the right, and 6 dark/light themes one key away.
 
+<img width="1280" height="775" alt="image" src="https://github.com/user-attachments/assets/2dadd5ab-127b-43fd-b426-bbd80cce49c1" />
+
+
 ```sh
 mdtui [PATH] [-t THEME] [--lang en|zh]
 ```
