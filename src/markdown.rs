@@ -105,7 +105,8 @@ struct Builder<'t> {
     items: Vec<ItemCtx>,
     quote_depth: usize,
     in_code: bool,
-    code_style: Style,
+    code_lines: Vec<String>,
+    code_lang: String,
     pending_prefix: Vec<Span<'static>>,
     pending_plain: String,
     heading: Option<HeadingLevel>,
@@ -122,7 +123,6 @@ struct Builder<'t> {
 
 impl<'t> Builder<'t> {
     fn new(theme: &'t Theme) -> Self {
-        let code_style = Style::default().fg(theme.code_fg).bg(theme.code_bg);
         Self {
             theme,
             out: Vec::new(),
@@ -133,7 +133,8 @@ impl<'t> Builder<'t> {
             items: Vec::new(),
             quote_depth: 0,
             in_code: false,
-            code_style,
+            code_lines: Vec::new(),
+            code_lang: String::new(),
             pending_prefix: Vec::new(),
             pending_plain: String::new(),
             heading: None,
@@ -149,12 +150,11 @@ impl<'t> Builder<'t> {
         }
     }
 
-    /// 当前内联样式：基础色（引用/代码/普通）+ 修饰栈。
+    /// 当前内联样式：基础色（引用/普通）+ 修饰栈。
+    /// 代码块文本走 code_lines 累积、高亮，不经过这里。
     fn cur_style(&self) -> Style {
         let t = self.theme;
-        let mut s = if self.in_code {
-            self.code_style
-        } else if self.quote_depth > 0 {
+        let mut s = if self.quote_depth > 0 {
             Style::default().fg(t.quote_fg)
         } else {
             Style::default().fg(t.fg)
@@ -207,6 +207,23 @@ impl<'t> Builder<'t> {
         }
         self.cur_plain.push_str(&text);
         self.cur.push(Span::styled(text, style));
+    }
+
+    /// 代码块文本累积：首段拼到当前行尾，其余各成新行。
+    fn push_code_text(&mut self, text: &str) {
+        let clean = text.replace('\t', "    ");
+        let mut parts = clean.split('\n');
+        if let Some(first) = parts.next() {
+            if self.code_lines.is_empty() {
+                self.code_lines.push(String::new());
+            }
+            if let Some(last) = self.code_lines.last_mut() {
+                last.push_str(first);
+            }
+        }
+        for part in parts {
+            self.code_lines.push(part.to_string());
+        }
     }
 
     fn push_text(&mut self, text: &str) {
@@ -511,14 +528,15 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
                 Tag::CodeBlock(kind) => {
                     b.flush(LineKind::Normal);
                     b.in_code = true;
-                    let lang = match &kind {
+                    b.code_lines = vec![String::new()];
+                    b.code_lang = match &kind {
                         CodeBlockKind::Fenced(s) => s.to_string(),
                         CodeBlockKind::Indented => String::new(),
                     };
-                    let label = if lang.is_empty() {
+                    let label = if b.code_lang.is_empty() {
                         "```".to_string()
                     } else {
-                        format!("```{lang}")
+                        format!("```{}", b.code_lang)
                     };
                     b.out.push(LogicalLine {
                         line: Line::from(vec![Span::styled(
@@ -646,8 +664,20 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
                     b.blank();
                 }
                 TagEnd::CodeBlock => {
-                    b.flush(LineKind::Code);
                     b.in_code = false;
+                    // 末尾空行是文本尾换行符的副产品，去掉更干净
+                    while b.code_lines.last().is_some_and(|l| l.is_empty()) {
+                        b.code_lines.pop();
+                    }
+                    let lang = std::mem::take(&mut b.code_lang);
+                    let lines = std::mem::take(&mut b.code_lines);
+                    for (spans, text) in crate::syntax::highlight_code_lines(t, &lang, &lines) {
+                        b.out.push(LogicalLine {
+                            line: Line::from(spans),
+                            kind: LineKind::Code,
+                            plain: text,
+                        });
+                    }
                     b.out.push(LogicalLine {
                         line: Line::from(vec![Span::styled(
                             "```",
@@ -733,19 +763,8 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
             },
             Event::Text(s) => {
                 if b.in_code {
-                    // 代码块文本可能含换行：逐行刷出
-                    let style = b.code_style;
-                    let mut parts = s.split('\n').peekable();
-                    let first = parts.next().unwrap_or("");
-                    if !first.is_empty() {
-                        b.push_span(first.replace('\t', "    "), style);
-                    }
-                    for part in parts {
-                        b.flush(LineKind::Code);
-                        if !part.is_empty() {
-                            b.push_span(part.replace('\t', "    "), style);
-                        }
-                    }
+                    // 代码块文本只累积，End 时统一高亮（跨行注释等需要整块上下文）
+                    b.push_code_text(&s);
                 } else {
                     b.push_text(&s);
                 }
@@ -782,17 +801,17 @@ pub fn render_markdown(src: &str, theme: &Theme) -> RenderedDoc {
             }
             Event::SoftBreak => {
                 if b.in_code {
-                    b.flush(LineKind::Code);
+                    b.code_lines.push(String::new());
                 } else {
                     b.push_span(" ".to_string(), b.cur_style());
                 }
             }
             Event::HardBreak => {
-                b.flush(if b.in_code {
-                    LineKind::Code
+                if b.in_code {
+                    b.code_lines.push(String::new());
                 } else {
-                    LineKind::Normal
-                });
+                    b.flush(LineKind::Normal);
+                }
             }
             Event::Rule => {
                 b.flush(LineKind::Normal);

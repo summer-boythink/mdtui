@@ -5,6 +5,7 @@
 mod app;
 mod cli;
 mod markdown;
+mod syntax;
 mod theme;
 mod tree;
 mod ui;

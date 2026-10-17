@@ -497,6 +497,7 @@ impl App {
                 };
             }
             KeyCode::Char('b') => self.toggle_sidebar(),
+            KeyCode::Char('e') => self.toggle_sidebar(), // Explorer：与 b 同义，好按
             KeyCode::Char('t') => self.cycle_theme(1),
             KeyCode::Char('T') => self.cycle_theme(-1),
             KeyCode::Char('[') => self.adjust_sidebar(-2),
@@ -645,7 +646,10 @@ impl App {
 
     fn toggle_sidebar(&mut self) {
         self.sidebar_visible = !self.sidebar_visible;
-        if !self.sidebar_visible && self.focus == Focus::Sidebar {
+        if self.sidebar_visible {
+            // 显示即聚焦：切到文件树就是为了操作它，省一次 Tab
+            self.focus = Focus::Sidebar;
+        } else if self.focus == Focus::Sidebar {
             self.focus = Focus::Preview;
         }
     }
@@ -653,7 +657,10 @@ impl App {
     fn adjust_sidebar(&mut self, delta: i16) {
         let w = (self.sidebar_width as i16 + delta).clamp(15, 60) as u16;
         self.sidebar_width = w;
-        self.sidebar_visible = true;
+        if !self.sidebar_visible {
+            self.sidebar_visible = true;
+            self.focus = Focus::Sidebar;
+        }
     }
 
     /// 侧边栏标题：根目录名 + 过滤状态。
@@ -819,6 +826,26 @@ mod tests {
         app.side_area = Rect::default();
         app.prev_area = Rect::default();
         app.on_mouse(MouseEventKind::ScrollDown, 5, 5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sidebar_toggle_keys() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let dir = sample_project("sidebar-keys");
+        let mut app = App::new(&dir, None, 0);
+        assert!(app.sidebar_visible);
+        // b 隐藏
+        app.on_key(KeyCode::Char('b'), KeyModifiers::NONE);
+        assert!(!app.sidebar_visible);
+        assert_eq!(app.focus, Focus::Preview);
+        // e 显示并聚焦
+        app.on_key(KeyCode::Char('e'), KeyModifiers::NONE);
+        assert!(app.sidebar_visible);
+        assert_eq!(app.focus, Focus::Sidebar);
+        // Ctrl+B 同样可用
+        app.on_key(KeyCode::Char('b'), KeyModifiers::CONTROL);
+        assert!(!app.sidebar_visible);
         let _ = fs::remove_dir_all(&dir);
     }
 

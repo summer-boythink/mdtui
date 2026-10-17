@@ -333,8 +333,8 @@ fn help_lines(t: &Theme) -> Vec<Line<'static>> {
         h(" 侧边栏"),
         k("l/→/回车", "展开目录 / 打开文件"),
         k("h/←", "收起目录 / 回到父目录"),
-        k("Tab", "切换侧栏 / 预览焦点"),
-        k("b（Ctrl+B）", "显示 / 隐藏侧栏"),
+        k("Tab · 点击", "切换侧栏 / 预览焦点（滚轮指哪滚哪，不用切）"),
+        k("b/e（Ctrl+B）", "显示并聚焦 / 隐藏侧栏"),
         k("[ · ]", "侧栏变窄 / 变宽"),
         k("a", "仅 Markdown ⇄ 显示全部文件"),
         k("R", "刷新文件树与当前文件"),
@@ -397,7 +397,7 @@ fn render_footer(f: &mut Frame, app: &mut App, theme: &Theme, area: ratatui::lay
                 " j/k 移动 · l/回车 打开 · h 收起 · Tab 预览 · ? 帮助 · q 退出".to_string()
             }
             Focus::Preview => {
-                " j/k/d/u/g/G 滚动 · / 搜索 · t 主题 · b 侧栏 · ? 帮助 · q 退出".to_string()
+                " j/k/d/u/g/G 滚动 · / 搜索 · t 主题 · b/e 侧栏 · ? 帮助 · q 退出".to_string()
             }
         };
         left_spans.push(Span::styled(
